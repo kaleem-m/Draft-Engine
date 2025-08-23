@@ -1,17 +1,16 @@
---- a/js/config.js+++ b/js/config.js@@ -1,13 +1,13 @@ // Firebase Configuration
--// IMPORTANT: Replace with your own Firebase config
- const firebaseConfig = {
-  apiKey: "AIzaSyAuANB_8bVKGMvgNHXKE-7svI3jmWvUUxw",
-  authDomain: "draftboard-fd6e5.firebaseapp.com",
-  databaseURL: "https://draftboard-fd6e5-default-rtdb.firebaseio.com",
-  projectId: "draftboard-fd6e5",
-  storageBucket: "draftboard-fd6e5.firebasestorage.app",
-  messagingSenderId: "965777715027",
-  appId: "1:965777715027:web:29cdebdb0b752df5343ba6"
-  
+// Firebase Configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyAuANB_8bVKGMvgNHXKE-7svI3jmWvUUxw",
+    authDomain: "draftboard-fd6e5.firebaseapp.com",
+    databaseURL: "https://draftboard-fd6e5-default-rtdb.firebaseio.com",
+    projectId: "draftboard-fd6e5",
+    storageBucket: "draftboard-fd6e5.firebasestorage.app",
+    messagingSenderId: "965777715027",
+    appId: "1:965777715027:web:29cdebdb0b752df5343ba6"
 };
- 
- // Initialize Firebase
+
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
 
 // Firebase services
 const auth = firebase.auth();
