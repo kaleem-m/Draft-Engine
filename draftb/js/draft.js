@@ -18,12 +18,29 @@ const draftModule = {
         });
         
         // Join draft button
-        document.getElementById('joinDraftBtn').addEventListener('click', () => {
-            const code = document.getElementById('joinDraftCode').value.trim().toUpperCase();
-            if (code) {
-                this.joinDraft(code);
-            } else {
+        document.getElementById('joinDraftBtn').addEventListener('click', async () => {
+            const codeInput = document.getElementById('joinDraftCode');
+            const code = codeInput.value.trim().toUpperCase();
+            const joinBtn = document.getElementById('joinDraftBtn');
+            
+            if (!code) {
                 utils.showToast('Please enter a draft code', 'error');
+                codeInput.focus();
+                return;
+            }
+            
+            // Disable button during join process
+            joinBtn.disabled = true;
+            joinBtn.textContent = 'Joining...';
+            
+            try {
+                await this.joinDraft(code);
+                // Clear the input on successful join
+                codeInput.value = '';
+            } finally {
+                // Re-enable button
+                joinBtn.disabled = false;
+                joinBtn.textContent = 'Join Draft';
             }
         });
         
@@ -70,6 +87,13 @@ const draftModule = {
         
         document.getElementById('positionFilter').addEventListener('change', () => {
             this.filterPlayers();
+        });
+        
+        // Enter key support for join draft code
+        document.getElementById('joinDraftCode').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                document.getElementById('joinDraftBtn').click();
+            }
         });
     },
     
@@ -147,7 +171,7 @@ const draftModule = {
             currentPick: 1,
             currentRound: 1,
             currentTeam: 1,
-            status: 'active', // waiting, active, paused, completed - Start as active
+            status: 'waiting', // waiting, active, paused, completed - Start as waiting
             draftOrder: [],
             picks: {},
             teamRosters: {},
@@ -165,13 +189,12 @@ const draftModule = {
             };
         }
         
-        // Add creator as first participant
+        // Don't assign creator to team automatically - they will choose during team selection
         draftData.participants[authModule.currentUser.uid] = {
             email: authModule.currentUser.email,
-            team: 'team1',
+            team: null, // Will be assigned during team selection
             joinedAt: firebase.database.ServerValue.TIMESTAMP
         };
-        draftData.teamRosters.team1.owner = authModule.currentUser.uid;
         
         try {
             // Save draft to Firebase
@@ -192,10 +215,18 @@ const draftModule = {
     
     async joinDraft(draftCode) {
         try {
+            // Validate draft code format
+            if (!draftCode || draftCode.length !== 6) {
+                utils.showToast('Invalid draft code format', 'error');
+                return;
+            }
+            
+            utils.showToast('Joining draft...', 'info');
+            
             const draftSnapshot = await database.ref(`drafts/${draftCode}`).once('value');
             
             if (!draftSnapshot.exists()) {
-                utils.showToast('Draft not found', 'error');
+                utils.showToast('Draft not found. Please check the code and try again.', 'error');
                 return;
             }
             
@@ -203,45 +234,46 @@ const draftModule = {
             this.currentDraft.code = draftCode;
             this.draftRef = database.ref(`drafts/${draftCode}`);
             
-            // Add user to draft if not already there
             const userId = authModule.currentUser.uid;
-            if (!this.currentDraft.participants[userId] && !this.currentDraft.spectators[userId]) {
-                // Find an available team
-                let availableTeam = null;
-                for (let i = 1; i <= this.currentDraft.teams; i++) {
-                    const teamKey = `team${i}`;
-                    if (!this.currentDraft.teamRosters[teamKey].owner) {
-                        availableTeam = teamKey;
-                        break;
-                    }
-                }
+            
+            // Check if user is already in the draft
+            const isParticipant = this.currentDraft.participants && this.currentDraft.participants[userId];
+            const isSpectator = this.currentDraft.spectators && this.currentDraft.spectators[userId];
+            
+            if (!isParticipant && !isSpectator) {
+                // Join as participant without team assignment (will choose later)
+                await this.draftRef.child(`participants/${userId}`).set({
+                    email: authModule.currentUser.email,
+                    team: null, // Will be assigned during team selection
+                    joinedAt: firebase.database.ServerValue.TIMESTAMP
+                });
                 
-                if (availableTeam) {
-                    // Join as participant
-                    await this.draftRef.child(`participants/${userId}`).set({
-                        email: authModule.currentUser.email,
-                        team: availableTeam,
-                        joinedAt: firebase.database.ServerValue.TIMESTAMP
-                    });
-                    await this.draftRef.child(`teamRosters/${availableTeam}/owner`).set(userId);
-                } else {
-                    // Join as spectator
-                    await this.draftRef.child(`spectators/${userId}`).set({
-                        email: authModule.currentUser.email,
-                        joinedAt: firebase.database.ServerValue.TIMESTAMP
-                    });
-                }
+                utils.showToast('Successfully joined draft!', 'success');
+            } else {
+                utils.showToast('Rejoining draft...', 'info');
             }
             
             // Add to user's drafts
             await database.ref(`users/${userId}/drafts/${draftCode}`).set(true);
             
-            // Navigate to draft board
-            this.showDraftBoard();
+            // Navigate to team selection or draft board based on draft status
+            if (this.currentDraft.status === 'waiting') {
+                this.showTeamSelection();
+            } else {
+                this.showDraftBoard();
+            }
             
         } catch (error) {
             console.error('Error joining draft:', error);
-            utils.showToast('Error joining draft', 'error');
+            
+            // Provide more specific error messages
+            if (error.code === 'PERMISSION_DENIED') {
+                utils.showToast('Permission denied. Please check if you are signed in.', 'error');
+            } else if (error.code === 'NETWORK_ERROR') {
+                utils.showToast('Network error. Please check your connection and try again.', 'error');
+            } else {
+                utils.showToast('Error joining draft. Please try again.', 'error');
+            }
         }
     },
     
@@ -249,6 +281,7 @@ const draftModule = {
         // Hide other screens
         document.getElementById('dashboardScreen').classList.add('hidden');
         document.getElementById('draftSetupScreen').classList.add('hidden');
+        document.getElementById('teamSelectionScreen').classList.add('hidden');
         document.getElementById('draftBoardScreen').classList.remove('hidden');
         
         // Update draft info
@@ -258,18 +291,6 @@ const draftModule = {
         // Show admin controls if creator
         if (this.currentDraft.createdBy === authModule.currentUser.uid) {
             document.getElementById('draftControls').classList.remove('hidden');
-            
-            // Add start draft button if needed
-            if (this.currentDraft.status === 'waiting') {
-                const startBtn = document.createElement('button');
-                startBtn.id = 'startDraftBtn';
-                startBtn.className = 'px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition mr-2';
-                startBtn.innerHTML = '<i class="fas fa-play"></i> Start Draft';
-                startBtn.onclick = () => this.startDraft();
-                
-                const controls = document.getElementById('draftControls').querySelector('.flex');
-                controls.insertBefore(startBtn, controls.firstChild);
-            }
         }
         
         // Initialize draft board
@@ -333,6 +354,9 @@ const draftModule = {
             
             if (canPick) {
                 playerDiv.classList.add('cursor-pointer', 'hover:bg-indigo-100', 'dark:hover:bg-indigo-900');
+                playerDiv.style.cursor = 'pointer';
+            } else {
+                playerDiv.style.cursor = isDrafted ? 'not-allowed' : 'default';
             }
             
             playerDiv.innerHTML = `
@@ -390,21 +414,39 @@ const draftModule = {
         const container = document.getElementById('teamBoards');
         container.innerHTML = '';
         
+        // Show only teams with owners first, then empty teams
+        const teamsWithOwners = [];
+        const teamsWithoutOwners = [];
+        
         for (let i = 1; i <= this.currentDraft.teams; i++) {
             const teamKey = `team${i}`;
             const team = this.currentDraft.teamRosters[teamKey];
+            
+            if (team.owner) {
+                teamsWithOwners.push({ key: teamKey, team, number: i });
+            } else {
+                teamsWithoutOwners.push({ key: teamKey, team, number: i });
+            }
+        }
+        
+        // Render teams with owners first
+        [...teamsWithOwners, ...teamsWithoutOwners].forEach(({ key: teamKey, team, number: i }) => {
             const isCurrentTeam = this.currentDraft.currentTeam === i;
+            
+            // Find participant for this team
+            const participant = team.owner ? 
+                Object.values(this.currentDraft.participants || {}).find(p => p.team === teamKey) : null;
             
             const teamDiv = document.createElement('div');
             teamDiv.className = `team-board bg-white dark:bg-gray-800 rounded-lg p-4 shadow ${isCurrentTeam ? 'active' : ''}`;
             teamDiv.innerHTML = `
                 <h4 class="font-bold text-gray-800 dark:text-white mb-2">
                     ${team.name}
-                    ${team.owner ? `<span class="text-sm font-normal text-gray-600 dark:text-gray-400">(${this.currentDraft.participants[team.owner]?.email || 'Unknown'})</span>` : '<span class="text-sm font-normal text-gray-500">(Available)</span>'}
+                    ${team.owner ? `<span class="text-sm font-normal text-gray-600 dark:text-gray-400">(${participant?.email || 'Unknown User'})</span>` : '<span class="text-sm font-normal text-gray-500">(Available)</span>'}
                 </h4>
                 <div class="space-y-1 max-h-48 overflow-y-auto">
-                    ${team.picks.map(pick => `
-                        <div class="text-sm p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                    ${(team.picks || []).map(pick => `
+                        <div class="text-sm p-2 bg-gray-50 dark:bg-gray-700 rounded pick-animation">
                             <span class="font-medium">${pick.player.name}</span>
                             <span class="text-gray-500 dark:text-gray-400"> - ${pick.player.position}</span>
                         </div>
@@ -413,7 +455,7 @@ const draftModule = {
             `;
             
             container.appendChild(teamDiv);
-        }
+        });
     },
     
     setupRealtimeListeners() {
@@ -464,17 +506,17 @@ const draftModule = {
     
     checkMyTurn() {
         const userId = authModule.currentUser.uid;
-        const participant = this.currentDraft.participants[userId];
+        const participant = this.currentDraft.participants?.[userId];
         
         console.log('Checking turn - User ID:', userId);
         console.log('Participant:', participant);
         console.log('Current Team:', this.currentDraft.currentTeam);
         console.log('Draft Status:', this.currentDraft.status);
         
-        if (participant) {
+        if (participant && participant.team && this.currentDraft.status === 'active') {
             const currentTeamKey = `team${this.currentDraft.currentTeam}`;
             const wasMyTurn = this.isMyTurn;
-            this.isMyTurn = participant.team === currentTeamKey && this.currentDraft.status === 'active';
+            this.isMyTurn = participant.team === currentTeamKey;
             
             console.log('My team:', participant.team, 'Current team:', currentTeamKey, 'Is my turn:', this.isMyTurn);
             
@@ -563,12 +605,16 @@ const draftModule = {
         let round = this.currentDraft.currentRound;
         let team = this.currentDraft.currentTeam;
         
+        // Use draft order if available, otherwise fall back to simple team numbering
+        const draftOrder = this.currentDraft.draftOrder || [];
+        const activeTeamsCount = draftOrder.length || this.currentDraft.teams;
+        
         // Snake draft logic
         if (round % 2 === 1) {
             // Odd round - normal order
             team++;
-            if (team > this.currentDraft.teams) {
-                team = this.currentDraft.teams;
+            if (team > activeTeamsCount) {
+                team = activeTeamsCount;
                 round++;
             }
         } else {
@@ -614,6 +660,9 @@ const draftModule = {
             
             if (canPick) {
                 playerDiv.classList.add('cursor-pointer', 'hover:bg-indigo-100', 'dark:hover:bg-indigo-900');
+                playerDiv.style.cursor = 'pointer';
+            } else {
+                playerDiv.style.cursor = isDrafted ? 'not-allowed' : 'default';
             }
             
             playerDiv.innerHTML = `
@@ -817,6 +866,219 @@ const draftModule = {
         }, 3000);
     },
     
+    showTeamSelection() {
+        // Hide other screens
+        document.getElementById('dashboardScreen').classList.add('hidden');
+        document.getElementById('draftSetupScreen').classList.add('hidden');
+        document.getElementById('draftBoardScreen').classList.add('hidden');
+        document.getElementById('teamSelectionScreen').classList.remove('hidden');
+        
+        // Update draft info
+        document.getElementById('teamSelectionDraftCode').textContent = this.currentDraft.code;
+        document.getElementById('totalTeamsCount').textContent = this.currentDraft.teams;
+        
+        // Render team selection
+        this.renderTeamSelection();
+        
+        // Setup team selection listeners
+        this.setupTeamSelectionListeners();
+        
+        // Show start button if creator and enough participants
+        if (this.currentDraft.createdBy === authModule.currentUser.uid) {
+            document.getElementById('startDraftFromSelectionBtn').classList.remove('hidden');
+        }
+    },
+    
+    renderTeamSelection() {
+        const container = document.getElementById('teamSelectionGrid');
+        const userId = authModule.currentUser.uid;
+        const participant = this.currentDraft.participants[userId];
+        
+        container.innerHTML = '';
+        
+        // Count participants with assigned teams
+        let participantCount = 0;
+        Object.values(this.currentDraft.participants).forEach(p => {
+            if (p.team) participantCount++;
+        });
+        document.getElementById('participantCount').textContent = participantCount;
+        
+        for (let i = 1; i <= this.currentDraft.teams; i++) {
+            const teamKey = `team${i}`;
+            const team = this.currentDraft.teamRosters[teamKey];
+            const isOwned = team.owner !== null;
+            const isMyTeam = participant && participant.team === teamKey;
+            
+            const teamDiv = document.createElement('div');
+            teamDiv.className = `team-selection-card p-4 border-2 rounded-lg cursor-pointer transition ${
+                isMyTeam ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900' :
+                isOwned ? 'border-gray-300 bg-gray-100 dark:bg-gray-700 cursor-not-allowed opacity-50' :
+                'border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900'
+            }`;
+            
+            const ownerInfo = isOwned ? 
+                this.currentDraft.participants[team.owner] || 
+                Object.values(this.currentDraft.participants).find(p => p.team === teamKey) : null;
+            
+            teamDiv.innerHTML = `
+                <div class="text-center">
+                    <h3 class="text-lg font-bold text-gray-800 dark:text-white mb-2">${team.name}</h3>
+                    <div class="text-sm text-gray-600 dark:text-gray-400">
+                        ${isOwned ? 
+                            `<p class="font-medium">${ownerInfo?.email || 'Unknown'}</p>
+                             <p class="text-green-600 dark:text-green-400">Taken</p>` :
+                            `<p class="text-blue-600 dark:text-blue-400">Available</p>`
+                        }
+                        ${isMyTeam ? '<p class="text-indigo-600 dark:text-indigo-400 font-bold">Your Team</p>' : ''}
+                    </div>
+                </div>
+            `;
+            
+            if (!isOwned && !isMyTeam) {
+                teamDiv.onclick = () => this.selectTeam(teamKey);
+            } else if (isMyTeam) {
+                teamDiv.onclick = () => this.deselectTeam();
+            }
+            
+            container.appendChild(teamDiv);
+        }
+    },
+    
+    setupTeamSelectionListeners() {
+        // Spectate button
+        document.getElementById('spectateBtn').onclick = () => {
+            this.joinAsSpectator();
+        };
+        
+        // Start draft button (admin only)
+        document.getElementById('startDraftFromSelectionBtn').onclick = () => {
+            this.startDraftFromSelection();
+        };
+        
+        // Setup realtime listeners for team selection updates
+        this.setupTeamSelectionRealtimeListeners();
+    },
+    
+    setupTeamSelectionRealtimeListeners() {
+        // Clean up existing listeners
+        this.cleanup();
+        
+        // Listen for draft updates
+        const listener = this.draftRef.on('value', (snapshot) => {
+            this.currentDraft = snapshot.val();
+            this.currentDraft.code = snapshot.key;
+            
+            // Update team selection UI
+            this.renderTeamSelection();
+            
+            // If draft started, navigate to draft board
+            if (this.currentDraft.status === 'active') {
+                this.showDraftBoard();
+            }
+        });
+        
+        this.listeners.push(() => this.draftRef.off('value', listener));
+    },
+    
+    async selectTeam(teamKey) {
+        const userId = authModule.currentUser.uid;
+        
+        try {
+            // First check if team is still available
+            const teamSnapshot = await this.draftRef.child(`teamRosters/${teamKey}/owner`).once('value');
+            if (teamSnapshot.val()) {
+                utils.showToast('Team is no longer available', 'error');
+                return;
+            }
+            
+            // Update participant's team
+            await this.draftRef.child(`participants/${userId}/team`).set(teamKey);
+            await this.draftRef.child(`teamRosters/${teamKey}/owner`).set(userId);
+            
+            utils.showToast(`Selected ${this.currentDraft.teamRosters[teamKey].name}!`, 'success');
+            
+        } catch (error) {
+            console.error('Error selecting team:', error);
+            utils.showToast('Error selecting team', 'error');
+        }
+    },
+    
+    async deselectTeam() {
+        const userId = authModule.currentUser.uid;
+        const participant = this.currentDraft.participants[userId];
+        
+        if (!participant || !participant.team) return;
+        
+        try {
+            // Remove team assignment
+            await this.draftRef.child(`participants/${userId}/team`).set(null);
+            await this.draftRef.child(`teamRosters/${participant.team}/owner`).set(null);
+            
+            utils.showToast('Team deselected', 'info');
+            
+        } catch (error) {
+            console.error('Error deselecting team:', error);
+            utils.showToast('Error deselecting team', 'error');
+        }
+    },
+    
+    async joinAsSpectator() {
+        const userId = authModule.currentUser.uid;
+        
+        try {
+            // Remove from participants and add to spectators
+            await this.draftRef.child(`participants/${userId}`).remove();
+            await this.draftRef.child(`spectators/${userId}`).set({
+                email: authModule.currentUser.email,
+                joinedAt: firebase.database.ServerValue.TIMESTAMP
+            });
+            
+            utils.showToast('Joined as spectator', 'info');
+            this.showDraftBoard();
+            
+        } catch (error) {
+            console.error('Error joining as spectator:', error);
+            utils.showToast('Error joining as spectator', 'error');
+        }
+    },
+    
+    async startDraftFromSelection() {
+        if (this.currentDraft.createdBy !== authModule.currentUser.uid) {
+            utils.showToast('Only the draft creator can start the draft', 'error');
+            return;
+        }
+        
+        // Check if we have enough participants with teams
+        const participantsWithTeams = Object.values(this.currentDraft.participants).filter(p => p.team).length;
+        
+        if (participantsWithTeams < 2) {
+            utils.showToast('Need at least 2 participants with selected teams to start the draft', 'error');
+            return;
+        }
+        
+        try {
+            // Generate draft order based on team assignments
+            const draftOrder = [];
+            for (let i = 1; i <= this.currentDraft.teams; i++) {
+                const teamKey = `team${i}`;
+                if (this.currentDraft.teamRosters[teamKey].owner) {
+                    draftOrder.push(teamKey);
+                }
+            }
+            
+            await this.draftRef.update({ 
+                status: 'active',
+                draftOrder: draftOrder
+            });
+            
+            utils.showToast('Draft started!', 'success');
+            
+        } catch (error) {
+            console.error('Error starting draft:', error);
+            utils.showToast('Error starting draft', 'error');
+        }
+    },
+
     cleanup() {
         // Remove all listeners
         this.listeners.forEach(removeListener => removeListener());

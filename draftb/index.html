@@ -218,6 +218,38 @@
             </div>
         </div>
 
+        <!-- Team Selection Screen -->
+        <div id="teamSelectionScreen" class="hidden max-w-4xl mx-auto">
+            <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-8">
+                <h2 class="text-3xl font-bold text-gray-800 dark:text-white mb-2">Choose Your Team</h2>
+                <p class="text-gray-600 dark:text-gray-400 mb-8">Select which team you want to manage in this draft.</p>
+                
+                <div id="teamSelectionGrid" class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
+                    <!-- Team selection cards will be added dynamically -->
+                </div>
+                
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">
+                            Draft Code: <span id="teamSelectionDraftCode" class="font-bold">XXXXX</span>
+                        </p>
+                        <p class="text-sm text-gray-600 dark:text-gray-400">
+                            Teams: <span id="participantCount">0</span> / <span id="totalTeamsCount">10</span> ready
+                        </p>
+                    </div>
+                    
+                    <div class="space-x-4" id="teamSelectionActions">
+                        <button id="spectateBtn" class="px-4 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600 transition">
+                            Join as Spectator
+                        </button>
+                        <button id="startDraftFromSelectionBtn" class="px-6 py-3 bg-green-600 text-white rounded-lg hover:bg-green-700 transition font-medium hidden">
+                            Start Draft
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Draft Board Screen -->
         <div id="draftBoardScreen" class="hidden">
             <div class="grid lg:grid-cols-3 gap-6">

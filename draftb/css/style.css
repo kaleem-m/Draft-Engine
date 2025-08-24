@@ -177,6 +177,24 @@
     z-index: 100;
 }
 
+/* Team Selection */
+.team-selection-card {
+    transition: all 0.3s ease;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.team-selection-card:hover:not(.cursor-not-allowed) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+}
+
+.team-selection-card.cursor-not-allowed {
+    transform: none;
+}
+
 /* Draft Complete Celebration */
 .celebration {
     position: fixed;
