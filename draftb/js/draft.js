@@ -903,10 +903,28 @@ const draftModule = {
         });
         document.getElementById('participantCount').textContent = participantCount;
         
+        // Debug logging
+        console.log('Team Selection Debug:', {
+            teams: this.currentDraft.teams,
+            teamRosters: this.currentDraft.teamRosters,
+            participants: this.currentDraft.participants
+        });
+        
         for (let i = 1; i <= this.currentDraft.teams; i++) {
             const teamKey = `team${i}`;
             const team = this.currentDraft.teamRosters[teamKey];
-            const isOwned = team.owner !== null;
+            
+            // Debug each team
+            console.log(`Team ${i} Debug:`, {
+                teamKey,
+                team,
+                owner: team.owner,
+                ownerType: typeof team.owner,
+                ownerValue: team.owner === null ? 'null' : team.owner === undefined ? 'undefined' : team.owner
+            });
+            
+            // Check if team has an owner (handle both null and undefined)
+            const isOwned = Boolean(team.owner);
             const isMyTeam = participant && participant.team === teamKey;
             
             const teamDiv = document.createElement('div');
@@ -916,9 +934,10 @@ const draftModule = {
                 'border-gray-300 hover:border-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900'
             }`;
             
+            // Find owner info - check both team.owner and participants with this team assigned
             const ownerInfo = isOwned ? 
-                this.currentDraft.participants[team.owner] || 
-                Object.values(this.currentDraft.participants).find(p => p.team === teamKey) : null;
+                (team.owner ? this.currentDraft.participants[team.owner] : null) || 
+                Object.values(this.currentDraft.participants || {}).find(p => p.team === teamKey) : null;
             
             teamDiv.innerHTML = `
                 <div class="text-center">
